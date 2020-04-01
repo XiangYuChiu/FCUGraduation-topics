@@ -1,0 +1,113 @@
+#define USE_ARDUINO_INTERRUPTS false
+#include <PulseSensorPlayground.h>
+
+/*
+   The format of our output.
+
+   Set this to PROCESSING_VISUALIZER if you're going to run
+    the Processing Visualizer Sketch.
+    See https://github.com/WorldFamousElectronics/PulseSensor_Amped_Processing_Visualizer
+
+   Set this to SERIAL_PLOTTER if you're going to run
+    the Arduino IDE's Serial Plotter.
+*/
+const int OUTPUT_TYPE = SERIAL_PLOTTER;
+
+/*
+      引腳排列：PULSE_INPUT =模擬輸入。 連接到脈衝傳感器紫色（信號）線。
+      PULSE_BLINK =數字輸出。 連接到LED（和220歐姆電阻)它將在每個檢測到的脈衝上閃爍。
+      PULSE_FADE =數字輸出。 PWM引腳連接到LED（和電阻器），該LED會隨著每個脈衝而平滑消失。
+      注意：PULSE_FADE必須是支持PWM的引腳。        
+      如果USE_INTERRUPTS為true，請不要將引腳9或10用於PULSE_FADE，因為這些引腳的PWM會干擾採樣計時器。
+*/
+const int PULSE_INPUT = A0;
+const int PULSE_BLINK = 13;    // Pin 13 is the on-board LED
+const int PULSE_FADE = 5;
+const int THRESHOLD = 550;   // Adjust this number to avoid noise when idle
+
+/*
+      直到報告的樣本數=直到我們要通過串行連接報告一個樣本之前剩餘的樣本數。
+      我們要報告串行端口上的樣本值每20毫秒僅一次（10個樣本），以避免進行串行輸出的速度超過了Arduino可以發送的速度。
+*/
+byte samplesUntilReport;
+const byte SAMPLES_PER_SERIAL_SAMPLE = 10;
+
+/*
+      所有PulseSensor遊樂場功能。
+*/
+PulseSensorPlayground pulseSensor;
+
+void setup() {
+  /*
+      使用115200波特，因為這是Processing Sketch希望讀取的內容，      
+      並且因為該速度每毫秒大約提供11個字節。
+
+      如果使用較低的波特率，則寫入字節的速度可能會比它們可以被傳輸快，這會弄亂時間readSensor（）的調用，它將進行脈衝測量無法正常工作。
+  */
+  Serial.begin(115200);
+
+  // Configure the PulseSensor manager.
+  pulseSensor.analogInput(PULSE_INPUT);
+  pulseSensor.blinkOnPulse(PULSE_BLINK);
+  pulseSensor.fadeOnPulse(PULSE_FADE);
+
+  pulseSensor.setSerial(Serial);
+  pulseSensor.setOutputType(OUTPUT_TYPE);
+  pulseSensor.setThreshold(THRESHOLD);
+
+  // Skip the first SAMPLES_PER_SERIAL_SAMPLE in the loop().
+  samplesUntilReport = SAMPLES_PER_SERIAL_SAMPLE;
+
+  // Now that everything is ready, start reading the PulseSensor signal.
+  if (!pulseSensor.begin()) {
+    /*
+        如果PulseSensor初始化失敗，可能是因為我們的Arduino平台中斷了尚不支持。
+
+        如果您的Sketch掛在這裡，請嘗試將USE_PS_INTERRUPT更改為false。
+    */
+    for(;;) {
+      // Flash the led to show things didn't work.
+      digitalWrite(PULSE_BLINK, LOW);
+      delay(50);
+      digitalWrite(PULSE_BLINK, HIGH);
+      delay(50);
+    }
+  }
+}
+
+void loop() {
+
+  /*
+        查看是否已從PulseSensor準備好樣品。
+
+        如果USE_INTERRUPTS為true，則PulseSensor Playground會自動從中讀取和處理樣品PulseSensor。
+
+        如果USE INTERRUPTS為false，則如果已經經過了足夠的時間，則對Simple（）的調用將讀取並處理來自Pulse Sensor的樣本（模擬電壓）。
+  */
+  if (pulseSensor.sawNewSample()) {
+    /*
+        經常發送最新的樣本。我們不會打印每個樣本，因為我們的波特率不能支持那麼多的I/O。
+    */
+    if (--samplesUntilReport == (byte) 0) {
+      samplesUntilReport = SAMPLES_PER_SERIAL_SAMPLE;
+
+      pulseSensor.outputSample();
+
+      /*
+         大約在每次心跳開始時，報告心率和心跳間隔。
+      */
+      
+      if (pulseSensor.sawStartOfBeat()) {
+        pulseSensor.outputBeat();
+      }
+    }
+
+    /*******
+      在這裡添加代碼可能會花費一毫秒左右的時間。
+    *******/
+  }
+
+  /******
+     不要在此處添加代碼，因為這可能會減慢從脈衝傳感器進行的採樣。
+  ******/
+}
